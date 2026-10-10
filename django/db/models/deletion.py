@@ -232,13 +232,15 @@ class Collector:
         """
         Get a QuerySet of objects related to `objs` via the relation `related`.
 
-        We only need the fields that may be used in a follow-up cascade query:
-        the primary key and any unique fields that can be used as foreign-key
-        targets. This avoids fetching unrelated columns while still allowing
-        subsequent cascade checks to work correctly.
+        We only need the fields required to follow the cascade: the primary key,
+        the foreign key target field if it is not the primary key, and any other
+        unique fields that may be referenced by subsequent deletes.
         """
         pk_name = related.related_model._meta.pk.name
         field_names = {pk_name}
+        target_field = related.field.target_field
+        if target_field.name != pk_name:
+            field_names.add(target_field.name)
         field_names.update(
             field.name for field in related.related_model._meta.fields
             if field.unique and field.name != pk_name
