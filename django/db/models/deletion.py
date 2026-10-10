@@ -232,20 +232,32 @@ class Collector:
         """
         Get a QuerySet of objects related to `objs` via the relation `related`.
 
-        We only need the fields required to follow the cascade: the primary key,
-        the foreign key target field if it is not the primary key, and any other
-        unique fields that may be referenced by subsequent deletes.
+        Only fetch the fields needed to continue cascade deletion: the primary
+        key, the foreign key target field used by the current relation, any
+        fields that are unique on the related model, and any fields that are
+        referenced by reverse relations which may be followed during the cascade.
         """
-        pk_name = related.related_model._meta.pk.name
+        model = related.related_model
+        pk_name = model._meta.pk.name
         field_names = {pk_name}
+
         target_field = related.field.target_field
         if target_field.name != pk_name:
             field_names.add(target_field.name)
+
         field_names.update(
-            field.name for field in related.related_model._meta.fields
+            field.name for field in model._meta.fields
             if field.unique and field.name != pk_name
         )
-        return related.related_model._base_manager.using(self.using).filter(
+
+        field_names.update(
+            field.field.target_field.name for field in model._meta.get_fields(include_hidden=True)
+            if field.auto_created and not field.concrete and (field.one_to_one or field.one_to_many)
+            and field.field.target_field is not None
+            and field.field.target_field.model == model
+        )
+
+        return model._base_manager.using(self.using).filter(
             **{"%s__in" % related.field.name: objs}
         ).only(*field_names)
 
