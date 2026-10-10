@@ -232,12 +232,18 @@ class Collector:
         """
         Get a QuerySet of objects related to `objs` via the relation `related`.
 
-        Only the primary key is required for deleting the related objects; avoid
-        loading any other fields during cascade discovery.
+        We only need the primary key for deletion, plus the target field when the
+        foreign key uses a non-primary key so that the queryset can safely match
+        the related objects without fetching unrelated columns.
         """
+        pk_name = related.related_model._meta.pk.name
+        field_names = [pk_name]
+        target_field_name = related.field.target_field.name
+        if target_field_name != pk_name:
+            field_names.append(target_field_name)
         return related.related_model._base_manager.using(self.using).filter(
             **{"%s__in" % related.field.name: objs}
-        ).only('pk')
+        ).only(*field_names)
 
     def instances_with_model(self):
         for model, instances in self.data.items():
