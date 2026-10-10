@@ -232,31 +232,32 @@ class Collector:
         """
         Get a QuerySet of objects related to `objs` via the relation `related`.
 
-        Only fetch the fields needed to continue cascade deletion: the primary
-        key, the foreign key target field used by the current relation, any
-        fields that are unique on the related model, and any fields that are
-        referenced by reverse relations which may be followed during the cascade.
+        We can restrict the queryset to the fields we need to continue the
+        cascade when there are no delete signals or parent relations that will
+        depend on the full model state. Otherwise, we must fetch the regular
+        model fields so signal handlers and inherited parent reconstruction can
+        still access them.
         """
         model = related.related_model
+
+        if (
+            signals.pre_delete.has_listeners(model) or
+            signals.post_delete.has_listeners(model) or
+            model._meta.parents
+        ):
+            return model._base_manager.using(self.using).filter(
+                **{"%s__in" % related.field.name: objs}
+            )
+
         pk_name = model._meta.pk.name
         field_names = {pk_name}
-
         target_field = related.field.target_field
         if target_field.name != pk_name:
             field_names.add(target_field.name)
-
         field_names.update(
             field.name for field in model._meta.fields
             if field.unique and field.name != pk_name
         )
-
-        field_names.update(
-            field.field.target_field.name for field in model._meta.get_fields(include_hidden=True)
-            if field.auto_created and not field.concrete and (field.one_to_one or field.one_to_many)
-            and field.field.target_field is not None
-            and field.field.target_field.model == model
-        )
-
         return model._base_manager.using(self.using).filter(
             **{"%s__in" % related.field.name: objs}
         ).only(*field_names)
